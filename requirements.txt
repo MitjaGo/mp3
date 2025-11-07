@@ -4,4 +4,6 @@ pydub
 tqdm
 eyed3
 Pillow
-
+mutagen
+numpy
+pandas
