@@ -7,3 +7,4 @@ Pillow
 mutagen
 numpy
 pandas
+watchdog
