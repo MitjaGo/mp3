@@ -2,4 +2,6 @@ streamlit
 yt-dlp
 pydub
 tqdm
+eyed3
+Pillow
 
