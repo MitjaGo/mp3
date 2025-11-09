@@ -200,12 +200,5 @@ if st.button("💾 Save All and Download ZIP"):
                 mime="application/zip"
             )
 
-        with open(tmp_zip.name, "rb") as f:
-            st.download_button(
-                label="⬇️ Download Edited MP3s as ZIP",
-                data=f,
-                file_name=zip_filename,
-                mime="application/zip"
-            )
-
+      
 
