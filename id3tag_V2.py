@@ -143,7 +143,6 @@ if st.button("💾 Save All and Download ZIP"):
                 audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
                 audiofile.tag.save(version=eyed3.id3.ID3_V2_3)
                 z.write(track["temp_path"], arcname=track["file"].name)
-
-     st.success("✅ All tags and album art updated successfully!")
+                st.success("✅ All tags and album art updated successfully!")
 
 
