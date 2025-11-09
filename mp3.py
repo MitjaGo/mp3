@@ -6,61 +6,81 @@ import subprocess
 from yt_dlp import YoutubeDL
 from concurrent.futures import ThreadPoolExecutor
 
-st.set_page_config(page_title="YouTube MP3 Downloader", layout="wide")
-st.title("YouTube Batch Audio Downloader (Skipped Report) 🎵")
-st.write("Upload a `.txt` file with YouTube URLs (one per line).")
+st.set_page_config(page_title="YouTube Best Audio MP3 Downloader", layout="wide")
+st.title("YouTube Search Audio Downloader (Best Audio, Top N Results) 🎵")
+st.write("Upload a `.txt` file with search terms (one per line).")
+
+# Let the user select how many top search results to check per term
+top_n = st.number_input("Number of search results to check per term", min_value=1, max_value=10, value=3, step=1)
 
 uploaded_file = st.file_uploader("Choose a .txt file", type="txt")
 
 if uploaded_file is not None:
-    urls = [line.strip() for line in uploaded_file.getvalue().decode("utf-8").splitlines() if line.strip()]
-    st.write(f"Found {len(urls)} URLs")
+    search_terms = [line.strip() for line in uploaded_file.getvalue().decode("utf-8").splitlines() if line.strip()]
+    st.write(f"Found {len(search_terms)} search terms")
 
-    if urls:
+    if search_terms:
         mp3_files = []
-        skipped_urls = []
+        skipped_terms = []
         progress_bar = st.progress(0)
         status_text = st.empty()
-        total_urls = len(urls)
-        executor = ThreadPoolExecutor(max_workers=8)
+        total_terms = len(search_terms)
+        executor = ThreadPoolExecutor(max_workers=4)
 
         def sanitize_filename(title):
             return "".join(c for c in title if c.isalnum() or c in " _-").rstrip()
 
-        async def download_convert(url, idx):
+        async def search_download_best_audio(term, idx):
             try:
                 loop = asyncio.get_event_loop()
-                ydl_opts_check = {
-                    'quiet': True,
-                    'skip_download': True
+                # Search top N results
+                search_url = f"ytsearch{top_n}:{term}"
+
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'quiet': True
                 }
 
-                # Check video availability
-                try:
-                    info = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts_check).extract_info(url, download=False))
-                except Exception:
-                    skipped_urls.append(url)
-                    st.warning(f"{idx+1}/{total_urls} Video unavailable or restricted: {url}")
+                info_dicts = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts).extract_info(search_url, download=False))
+
+                # Select the entry with highest audio bitrate
+                best_info = None
+                best_abr = 0
+                entries = info_dicts['entries'] if 'entries' in info_dicts else [info_dicts]
+
+                for entry in entries:
+                    formats = entry.get('formats', [])
+                    for f in formats:
+                        abr = f.get('abr', 0)
+                        if abr and abr > best_abr:
+                            best_abr = abr
+                            best_info = entry
+
+                if not best_info:
+                    skipped_terms.append(term)
+                    st.warning(f"{idx+1}/{total_terms} No valid audio found: {term}")
                     return
 
-                video_title = info.get('title', 'audio')
+                video_title = best_info.get('title', 'audio')
                 safe_title = sanitize_filename(video_title)
                 mp3_filename = f"{safe_title}.mp3"
 
                 # Skip if MP3 already exists
                 if os.path.exists(mp3_filename):
                     mp3_files.append(mp3_filename)
-                    st.info(f"{idx+1}/{total_urls} Skipped (already exists): {mp3_filename}")
+                    st.info(f"{idx+1}/{total_terms} Skipped (already exists): {mp3_filename}")
                     st.audio(mp3_filename, format="audio/mp3")
                     return
 
-                # Download video
+                # Download the best audio
+                download_url = f"https://www.youtube.com/watch?v={best_info['id']}"
                 ydl_opts_download = {
                     'format': 'bestaudio/best',
                     'outtmpl': 'downloaded.%(ext)s',
                     'quiet': True
                 }
-                info = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts_download).extract_info(url, download=True))
+
+                info = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts_download).extract_info(download_url, download=True))
                 downloaded_file = YoutubeDL(ydl_opts_download).prepare_filename(info)
 
                 # Convert to MP3 using ffmpeg
@@ -70,23 +90,23 @@ if uploaded_file is not None:
 
                 os.remove(downloaded_file)
                 mp3_files.append(mp3_filename)
-                st.success(f"{idx+1}/{total_urls} Converted: {mp3_filename}")
+                st.success(f"{idx+1}/{total_terms} Converted (Best Audio): {mp3_filename}")
                 st.audio(mp3_filename, format="audio/mp3")
 
             except Exception as e:
-                skipped_urls.append(url)
-                st.error(f"{idx+1}/{total_urls} Error: {url} -> {e}")
+                skipped_terms.append(term)
+                st.error(f"{idx+1}/{total_terms} Error: {term} -> {e}")
             finally:
-                progress_bar.progress(len(mp3_files)/total_urls)
+                progress_bar.progress(len(mp3_files)/total_terms)
 
         async def main():
-            await asyncio.gather(*(download_convert(url, i) for i, url in enumerate(urls)))
+            await asyncio.gather(*(search_download_best_audio(term, i) for i, term in enumerate(search_terms)))
 
         asyncio.run(main())
 
-        # Package all MP3s into ZIP
+        # Package MP3s into ZIP
         if mp3_files:
-            zip_filename = "youtube_audios.zip"
+            zip_filename = "youtube_best_audio.zip"
             with zipfile.ZipFile(zip_filename, "w") as zipf:
                 for mp3 in mp3_files:
                     zipf.write(mp3)
@@ -101,13 +121,14 @@ if uploaded_file is not None:
                     mime="application/zip"
                 )
 
-        # Display skipped/unavailable URLs report
-        if skipped_urls:
-            st.warning(f"{len(skipped_urls)} URL(s) were skipped due to being unavailable or errors:")
-            for url in skipped_urls:
-                st.write(f"- {url}")
+        # Display skipped search terms
+        if skipped_terms:
+            st.warning(f"{len(skipped_terms)} search term(s) could not be downloaded:")
+            for term in skipped_terms:
+                st.write(f"- {term}")
 
         status_text.text("Processing complete!")
+
 
 
 
