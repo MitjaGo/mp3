@@ -8,3 +8,4 @@ mutagen
 numpy
 pandas
 watchdog
+concurrent-log-handler
