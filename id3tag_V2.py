@@ -125,7 +125,52 @@ for mp3_file in uploaded_mp3s[:50]:
 # ===========================================
 # 💾 Step 5: Save and Download
 # ===========================================
+#st.header("💾 Save & Download")
+
+#if st.button("💾 Save All and Download ZIP"):
+#    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+#    zip_filename = f"edited_mp3s_{now}.zip"
+
+ #   with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_zip:
+ #       with zipfile.ZipFile(tmp_zip.name, "w") as z:
+  #          for track in edited_tracks:
+  #              audiofile = eyed3.load(track["temp_path"])
+  #              if audiofile.tag is None:
+  #                  audiofile.initTag()
+  #              audiofile.tag.title = track["title"]
+  #              audiofile.tag.artist = track["artist"]
+  #              audiofile.tag.album = track["album"]
+  #              audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
+  #              audiofile.tag.save(version=eyed3.id3.ID3_V2_3)
+  #              z.write(track["temp_path"], arcname=track["file"].name)
+
+   #     st.success("✅ All tags and album art updated successfully!")
+
+   #     with open(tmp_zip.name, "rb") as f:
+   #         st.download_button(
+   #             label="⬇️ Download Edited MP3s as ZIP",
+   #             data=f,
+   #             file_name=zip_filename,
+   #             mime="application/zip"
+   #         )
+
+
+# ===========================================
+# 💾 Step 5: Save and Download
+# ===========================================
 st.header("💾 Save & Download")
+
+def clean_text(s: str) -> str:
+    """Ensure text is encodable for ID3v2.3 (UTF-16 or fallback)."""
+    if not s:
+        return ""
+    try:
+        # Try UTF-16 first
+        s.encode("utf-16")
+        return s
+    except UnicodeEncodeError:
+        # Fallback: remove unsupported characters
+        return s.encode("latin-1", "ignore").decode("latin-1")
 
 if st.button("💾 Save All and Download ZIP"):
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -137,11 +182,18 @@ if st.button("💾 Save All and Download ZIP"):
                 audiofile = eyed3.load(track["temp_path"])
                 if audiofile.tag is None:
                     audiofile.initTag()
-                audiofile.tag.title = track["title"]
-                audiofile.tag.artist = track["artist"]
-                audiofile.tag.album = track["album"]
+
+                # Clean and encode-safe metadata
+                audiofile.tag.title = clean_text(track["title"])
+                audiofile.tag.artist = clean_text(track["artist"])
+                audiofile.tag.album = clean_text(track["album"])
+
+                # Set cover image (resized JPEG)
                 audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
-                audiofile.tag.save(version=eyed3.id3.ID3_V2_3)
+
+                # Save tag using ID3v2.3 + UTF-16 encoding
+                audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding='utf-16')
+
                 z.write(track["temp_path"], arcname=track["file"].name)
 
         st.success("✅ All tags and album art updated successfully!")
