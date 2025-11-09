@@ -12,13 +12,13 @@ import re
 import time
 
 # --- STEP 1: Streamlit app UI ---
-st.title("🎶 Batch YouTube to MP3 Downloader (URLs + Search Supported)")
+st.title("🎶 Batch YouTube to MP3 Downloader (1 file per search)")
 st.write("""
-Upload a text file with one song title **or** YouTube URL per line.  
-The app will download each as an MP3 file and bundle them into a ZIP.
+Upload a text file with one **song title** or **YouTube URL** per line.  
+Each entry will download **exactly one** MP3 file, no duplicates or extra formats.
 """)
 
-uploaded_file = st.file_uploader("📄 Upload text file", type=["txt"])
+uploaded_file = st.file_uploader("📄 Upload your text file", type=["txt"])
 
 if uploaded_file:
     search_terms = [
@@ -46,25 +46,30 @@ if uploaded_file:
         if existing_files:
             return (term, "skipped")
 
-        # Detect if this is a direct URL or a search term
+        # Use ytsearch1 to get only one video or use direct URL
         if is_youtube_url(term):
             query = term
         else:
-            query = f"ytsearch5:{term}"
+            query = f"ytsearch1:{term}"
 
         cmd = [
             "yt-dlp",
             query,
-            "-x",  # extract audio
-            "--audio-format", "mp3",
-            "--audio-quality", "0",
-            "-o", f"{output_dir}/%(title)s.%(ext)s",
-            "--restrict-filenames"
+            "-x",                        # extract audio
+            "--audio-format", "mp3",     # convert directly to MP3
+            "--audio-quality", "0",      # best quality
+            "--no-playlist",             # skip playlists
+            "-o", f"{output_dir}/%(title)s.%(ext)s",  # output filename
+            "--restrict-filenames"       # safe filenames
         ]
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
+                # Clean up non-MP3 files if yt-dlp leaves any behind
+                for f in os.listdir(output_dir):
+                    if not f.endswith(".mp3"):
+                        os.remove(os.path.join(output_dir, f))
                 return (term, "success")
             else:
                 print(f"❌ Error downloading {term}:\n{result.stderr}")
@@ -74,7 +79,7 @@ if uploaded_file:
             return (term, "failed")
 
     # --- STEP 5: Run downloads with a progress bar ---
-    MAX_WORKERS = 2  # safer: avoids rate-limits and connection issues
+    MAX_WORKERS = 2  # safer, avoids rate limits
     success, failed, skipped = [], [], []
 
     progress_bar = st.progress(0)
@@ -124,8 +129,13 @@ if uploaded_file:
     # --- STEP 9: Tips ---
     st.info("""
 💡 **Tips:**
-- If a song fails, try adding its full YouTube URL in your text file.
-- You can mix URLs and song titles — both will work.
-- Reduce failures further by running fewer downloads at once.
+- Each song or URL downloads only **one** MP3 file.
+- You can mix YouTube URLs and plain song titles in your text file.
+- If a download fails, try adding the full YouTube link instead of the search term.
 """)
+
+st.write("""
+by Micio
+""")
+
 
