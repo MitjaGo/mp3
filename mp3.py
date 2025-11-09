@@ -11,7 +11,7 @@ st.title("YouTube Search Audio Downloader (Retries & Best Audio) 🎵")
 st.write("Upload a `.txt` file with search terms (one per line).")
 
 # User selects top N search results per term
-top_n = st.number_input("Number of search results to check per term", min_value=1, max_value=2, value=1, step=1)
+top_n = st.number_input("Number of search results to check per term", min_value=1, max_value=10, value=5, step=1)
 
 uploaded_file = st.file_uploader("Choose a .txt file", type="txt")
 
@@ -143,6 +143,7 @@ if uploaded_file is not None:
                 st.write(f"- {term}")
 
         status_text.text("Processing complete!")
+
 
 
 
