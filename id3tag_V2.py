@@ -1,4 +1,4 @@
-# ===========================================
+make this fix for ID3 v2.3 for the following code # ===========================================
 # 🎧 Streamlit MP3 Tag Editor with Thumbnail & Bulk Album Support
 # ===========================================
 import streamlit as st
@@ -143,15 +143,14 @@ if st.button("💾 Save All and Download ZIP"):
                 audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
                 audiofile.tag.save(version=eyed3.id3.ID3_V2_3)
                 z.write(track["temp_path"], arcname=track["file"].name)
-                
-    st.success("✅ All tags and album art updated successfully!")
 
-    with open(tmp_zip.name, "rb") as f:
+        st.success("✅ All tags and album art updated successfully!")
+
+        with open(tmp_zip.name, "rb") as f:
             st.download_button(
                 label="⬇️ Download Edited MP3s as ZIP",
                 data=f,
                 file_name=zip_filename,
                 mime="application/zip"
             )
-
 
