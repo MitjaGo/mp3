@@ -6,8 +6,8 @@ import subprocess
 from yt_dlp import YoutubeDL
 from concurrent.futures import ThreadPoolExecutor
 
-st.set_page_config(page_title="Async YouTube MP3 Downloader", layout="wide")
-st.title("YouTube Batch Audio Downloader 🎵")
+st.set_page_config(page_title="YouTube MP3 Downloader", layout="wide")
+st.title("YouTube Batch Audio Downloader (Skipped Report) 🎵")
 st.write("Upload a `.txt` file with YouTube URLs (one per line).")
 
 uploaded_file = st.file_uploader("Choose a .txt file", type="txt")
@@ -18,6 +18,7 @@ if uploaded_file is not None:
 
     if urls:
         mp3_files = []
+        skipped_urls = []
         progress_bar = st.progress(0)
         status_text = st.empty()
         total_urls = len(urls)
@@ -28,15 +29,20 @@ if uploaded_file is not None:
 
         async def download_convert(url, idx):
             try:
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'outtmpl': 'downloaded.%(ext)s',
-                    'quiet': True
+                loop = asyncio.get_event_loop()
+                ydl_opts_check = {
+                    'quiet': True,
+                    'skip_download': True
                 }
 
-                loop = asyncio.get_event_loop()
-                # Download video
-                info = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts).extract_info(url, download=True))
+                # Check video availability
+                try:
+                    info = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts_check).extract_info(url, download=False))
+                except Exception:
+                    skipped_urls.append(url)
+                    st.warning(f"{idx+1}/{total_urls} Video unavailable or restricted: {url}")
+                    return
+
                 video_title = info.get('title', 'audio')
                 safe_title = sanitize_filename(video_title)
                 mp3_filename = f"{safe_title}.mp3"
@@ -48,9 +54,16 @@ if uploaded_file is not None:
                     st.audio(mp3_filename, format="audio/mp3")
                     return
 
-                downloaded_file = YoutubeDL(ydl_opts).prepare_filename(info)
+                # Download video
+                ydl_opts_download = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': 'downloaded.%(ext)s',
+                    'quiet': True
+                }
+                info = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts_download).extract_info(url, download=True))
+                downloaded_file = YoutubeDL(ydl_opts_download).prepare_filename(info)
 
-                # Convert to MP3 using ffmpeg subprocess
+                # Convert to MP3 using ffmpeg
                 await loop.run_in_executor(executor, lambda: subprocess.run([
                     "ffmpeg", "-y", "-i", downloaded_file, mp3_filename
                 ], check=True))
@@ -61,6 +74,7 @@ if uploaded_file is not None:
                 st.audio(mp3_filename, format="audio/mp3")
 
             except Exception as e:
+                skipped_urls.append(url)
                 st.error(f"{idx+1}/{total_urls} Error: {url} -> {e}")
             finally:
                 progress_bar.progress(len(mp3_files)/total_urls)
@@ -70,7 +84,7 @@ if uploaded_file is not None:
 
         asyncio.run(main())
 
-        # Package all MP3s into a ZIP
+        # Package all MP3s into ZIP
         if mp3_files:
             zip_filename = "youtube_audios.zip"
             with zipfile.ZipFile(zip_filename, "w") as zipf:
@@ -87,7 +101,14 @@ if uploaded_file is not None:
                     mime="application/zip"
                 )
 
+        # Display skipped/unavailable URLs report
+        if skipped_urls:
+            st.warning(f"{len(skipped_urls)} URL(s) were skipped due to being unavailable or errors:")
+            for url in skipped_urls:
+                st.write(f"- {url}")
+
         status_text.text("Processing complete!")
+
 
 
 
