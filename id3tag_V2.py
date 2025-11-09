@@ -1,4 +1,4 @@
-make this fix for ID3 v2.3 for the following code # ===========================================
+
 # 🎧 Streamlit MP3 Tag Editor with Thumbnail & Bulk Album Support
 # ===========================================
 import streamlit as st
