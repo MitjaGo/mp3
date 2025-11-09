@@ -140,7 +140,7 @@ if st.button("💾 Save All and Download ZIP"):
                 audiofile.tag.title = track["title"]
                 audiofile.tag.artist = track["artist"]
                 audiofile.tag.album = track["album"]
-               audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
+                audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
                 audiofile.tag.save(version=eyed3.id3.ID3_V2_3)
                 z.write(track["temp_path"], arcname=track["file"].name)
 
