@@ -7,7 +7,7 @@ from yt_dlp import YoutubeDL
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="Async YouTube MP3 Downloader", layout="wide")
-st.title("YouTube Batch Audio Downloader (FFmpeg, Async) 🎵")
+st.title("YouTube Batch Audio Downloader 🎵")
 st.write("Upload a `.txt` file with YouTube URLs (one per line).")
 
 uploaded_file = st.file_uploader("Choose a .txt file", type="txt")
