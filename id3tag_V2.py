@@ -215,3 +215,6 @@ if st.button("💾 Save All and Download ZIP"):
                 mime="application/zip"
             )
 
+st.write("""
+by Micio
+""")
