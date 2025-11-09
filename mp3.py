@@ -7,11 +7,11 @@ from yt_dlp import YoutubeDL
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="YouTube Best Audio MP3 Downloader", layout="wide")
-st.title("YouTube Search Audio Downloader (Best Audio, Top N Results) 🎵")
+st.title("YouTube Search Audio Downloader (Robust, Best Audio) 🎵")
 st.write("Upload a `.txt` file with search terms (one per line).")
 
-# Let the user select how many top search results to check per term
-top_n = st.number_input("Number of search results to check per term", min_value=1, max_value=10, value=3, step=1)
+# User selects top N search results per term
+top_n = st.number_input("Number of search results to check per term", min_value=1, max_value=10, value=5, step=1)
 
 uploaded_file = st.file_uploader("Choose a .txt file", type="txt")
 
@@ -33,53 +33,57 @@ if uploaded_file is not None:
         async def search_download_best_audio(term, idx):
             try:
                 loop = asyncio.get_event_loop()
-                # Search top N results
                 search_url = f"ytsearch{top_n}:{term}"
 
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'quiet': True
-                }
-
+                ydl_opts = {'format': 'bestaudio/best', 'quiet': True}
                 info_dicts = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts).extract_info(search_url, download=False))
 
-                # Select the entry with highest audio bitrate
+                entries = info_dicts.get('entries', [info_dicts])
                 best_info = None
                 best_abr = 0
-                entries = info_dicts['entries'] if 'entries' in info_dicts else [info_dicts]
 
+                # Iterate through search results to find first available with highest audio bitrate
                 for entry in entries:
-                    formats = entry.get('formats', [])
-                    for f in formats:
-                        abr = f.get('abr', 0)
-                        if abr and abr > best_abr:
-                            best_abr = abr
-                            best_info = entry
+                    try:
+                        formats = entry.get('formats', [])
+                        for f in formats:
+                            abr = f.get('abr', 0)
+                            if abr and abr > best_abr:
+                                best_abr = abr
+                                best_info = entry
+                        if best_info:
+                            # Try downloading to check availability
+                            download_url = f"https://www.youtube.com/watch?v={best_info['id']}"
+                            ydl_opts_download = {
+                                'format': 'bestaudio/best',
+                                'outtmpl': 'downloaded.%(ext)s',
+                                'quiet': True
+                            }
+                            info = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts_download).extract_info(download_url, download=False))
+                            # If successful, break
+                            break
+                    except Exception:
+                        continue  # skip unavailable entry
 
                 if not best_info:
                     skipped_terms.append(term)
-                    st.warning(f"{idx+1}/{total_terms} No valid audio found: {term}")
+                    st.warning(f"{idx+1}/{total_terms} No available video found: {term}")
                     return
 
                 video_title = best_info.get('title', 'audio')
                 safe_title = sanitize_filename(video_title)
                 mp3_filename = f"{safe_title}.mp3"
 
-                # Skip if MP3 already exists
+                # Skip if MP3 exists
                 if os.path.exists(mp3_filename):
                     mp3_files.append(mp3_filename)
                     st.info(f"{idx+1}/{total_terms} Skipped (already exists): {mp3_filename}")
                     st.audio(mp3_filename, format="audio/mp3")
                     return
 
-                # Download the best audio
+                # Download the available best audio video
                 download_url = f"https://www.youtube.com/watch?v={best_info['id']}"
-                ydl_opts_download = {
-                    'format': 'bestaudio/best',
-                    'outtmpl': 'downloaded.%(ext)s',
-                    'quiet': True
-                }
-
+                ydl_opts_download = {'format': 'bestaudio/best', 'outtmpl': 'downloaded.%(ext)s', 'quiet': True}
                 info = await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts_download).extract_info(download_url, download=True))
                 downloaded_file = YoutubeDL(ydl_opts_download).prepare_filename(info)
 
