@@ -10,26 +10,15 @@ import zipfile
 import re
 from datetime import datetime
 
-#ERROR GENRE#
-#----------------#
-eyed3.log.setLevel("ERROR")  # Suppress warnings
-
-audiofile = eyed3.load(temp_path)
-if audiofile is None or audiofile.tag is None:
-    print("⚠️ Could not read tag data, possibly invalid genre.")
-else:
-    # Manually reset the genre if invalid
-    try:
-        if audiofile.tag.genre and audiofile.tag.genre.id == 255:
-            audiofile.tag.genre = None
-            audiofile.tag.save()
-    except Exception as e:
-        print("Skipping invalid genre:", e)
-
-#----------------#
-
 st.set_page_config(page_title="MP3 Tag Editor", page_icon="🎵", layout="centered")
 st.title("🎧 MP3 Metadata & Thumbnail Editor")
+
+#CREATE ID V2#
+audiofile = eyed3.load(temp_path)
+if audiofile:
+    audiofile.tag = None  # Remove all tags
+    audiofile.initTag(version=(2, 3, 0))  # Create a clean ID3v2.3 tag
+    audiofile.tag.save()
 
 # ===========================================
 # 🧩 Helper Functions
