@@ -13,13 +13,6 @@ from datetime import datetime
 st.set_page_config(page_title="MP3 Tag Editor", page_icon="🎵", layout="centered")
 st.title("🎧 MP3 Metadata & Thumbnail Editor")
 
-#CREATE ID V2#
-audiofile = eyed3.load(temp_path)
-if audiofile:
-    audiofile.tag = None  # Remove all tags
-    audiofile.initTag(version=(2, 3, 0))  # Create a clean ID3v2.3 tag
-    audiofile.tag.save()
-
 # ===========================================
 # 🧩 Helper Functions
 # ===========================================
