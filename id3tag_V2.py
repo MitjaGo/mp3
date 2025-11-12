@@ -1,4 +1,3 @@
-
 # 🎧 Streamlit MP3 Tag Editor with Thumbnail & Bulk Album Support
 # ===========================================
 import streamlit as st
@@ -9,7 +8,11 @@ import tempfile
 import zipfile
 import re
 from datetime import datetime
+import unicodedata
 
+# ===========================================
+# ⚙️ Streamlit Setup
+# ===========================================
 st.set_page_config(page_title="MP3 Tag Editor", page_icon="🎵", layout="centered")
 st.title("🎧 MP3 Metadata & Thumbnail Editor")
 
@@ -52,6 +55,13 @@ def save_temp_file(uploaded_file):
         tmp.write(uploaded_file.getvalue())
         tmp_path = tmp.name
     return tmp_path
+
+def normalize_text(s: str) -> str:
+    """Normalize and strip invalid codepoints safely."""
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFC", s)
+    return s.replace("\x00", "")  # remove nulls which can break ID3
 
 # ===========================================
 # 📸 Step 1: Upload Default Thumbnail
@@ -96,7 +106,20 @@ for mp3_file in uploaded_mp3s[:50]:
 
     # Save temporarily to disk for eyed3
     temp_path = save_temp_file(mp3_file)
-    audiofile = eyed3.load(temp_path)
+
+    # 👇 Safe loading: ignore invalid genre IDs (like 255)
+    eyed3.log.setLevel("ERROR")
+    try:
+        audiofile = eyed3.load(temp_path)
+    except Exception:
+        audiofile = None
+
+    if audiofile and audiofile.tag and getattr(audiofile.tag, "genre", None):
+        try:
+            if audiofile.tag.genre and audiofile.tag.genre.id == 255:
+                audiofile.tag.genre = None
+        except Exception:
+            audiofile.tag.genre = None
 
     if audiofile is None:
         st.error(f"⚠️ Could not read {mp3_file.name}")
@@ -110,7 +133,11 @@ for mp3_file in uploaded_mp3s[:50]:
     artist = st.text_input(f"Artist ({mp3_file.name})", value=audiofile.tag.artist or artist_guess or "")
     album = bulk_album or (audiofile.tag.album or "")
 
-    img_upload = st.file_uploader(f"Replace thumbnail for {mp3_file.name}", type=["jpg", "jpeg", "png"], key=mp3_file.name)
+    img_upload = st.file_uploader(
+        f"Replace thumbnail for {mp3_file.name}", 
+        type=["jpg", "jpeg", "png"], 
+        key=mp3_file.name
+    )
     img_data = resize_jpeg(img_upload.getvalue()) if img_upload else default_img_data
 
     edited_tracks.append({
@@ -123,51 +150,9 @@ for mp3_file in uploaded_mp3s[:50]:
     })
 
 # ===========================================
-# 💾 Step 5: Save and Download
+# 💾 Step 5: Save and Download (Safe Encoding + No Genre)
 # ===========================================
-#st.header("💾 Save & Download")
-
-#if st.button("💾 Save All and Download ZIP"):
-#    now = datetime.now().strftime("%Y%m%d_%H%M%S")
-#    zip_filename = f"edited_mp3s_{now}.zip"
-
-#    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_zip:
-#        with zipfile.ZipFile(tmp_zip.name, "w") as z:
-#            for track in edited_tracks:
-#                audiofile = eyed3.load(track["temp_path"])
-#                if audiofile.tag is None:
-#                    audiofile.initTag()
-#                audiofile.tag.title = track["title"]
-#                audiofile.tag.artist = track["artist"]
-#                audiofile.tag.album = track["album"]
-#                audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
-#                audiofile.tag.save(version=eyed3.id3.ID3_V2_3)
-#                z.write(track["temp_path"], arcname=track["file"].name)
-#
-#        st.success("✅ All tags and album art updated successfully!")
-#
-#        with open(tmp_zip.name, "rb") as f:
-#            st.download_button(
-#                label="⬇️ Download Edited MP3s as ZIP",
-#                data=f,
-#                file_name=zip_filename,
-#                mime="application/zip"
-#           )
-
-
-# ===========================================
-# 💾 Step 6: Save and Download (Latin-1 → UTF-16 fallback)
-# ===========================================
-import unicodedata
-
 st.header("💾 Save & Download")
-
-def normalize_text(s: str) -> str:
-    """Normalize and strip invalid codepoints safely."""
-    if not s:
-        return ""
-    s = unicodedata.normalize("NFC", s)
-    return s.replace("\x00", "")  # remove nulls which can break ID3
 
 if st.button("💾 Save All and Download ZIP"):
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -192,6 +177,7 @@ if st.button("💾 Save All and Download ZIP"):
                 audiofile.tag.title = title
                 audiofile.tag.artist = artist
                 audiofile.tag.album = album
+                audiofile.tag.genre = None  # 🚫 No genre (avoid invalid IDs)
 
                 # Attach cover image
                 audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
@@ -218,3 +204,6 @@ if st.button("💾 Save All and Download ZIP"):
 st.write("""
 by Micio
 """)
+
+
+
