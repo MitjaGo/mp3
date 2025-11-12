@@ -1,4 +1,4 @@
-# 🎧 Streamlit MP3 Tag Editor (Stable & Fast)
+# 🎧 Streamlit MP3 Tag Editor (Final Stable Version)
 # ===========================================
 import streamlit as st
 import eyed3
@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 import unicodedata
 import os
+import shutil
 
 # ---------------------------------------
 # Streamlit setup
@@ -50,9 +51,10 @@ def normalize_text(s: str) -> str:
 
 def safe_load_audio(file_bytes: bytes):
     """Load MP3 safely from bytes buffer (no temp file errors)."""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-        tmp.write(file_bytes)
-        tmp_path = tmp.name
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tmp.write(file_bytes)
+    tmp_path = tmp.name
+    tmp.close()
     eyed3.log.setLevel("ERROR")
     try:
         audiofile = eyed3.load(tmp_path)
@@ -92,10 +94,10 @@ if not uploaded_mp3s:
     st.stop()
 
 # ---------------------------------------
-# Step 3: Album
+# Step 3: Bulk Album Editor
 # ---------------------------------------
 st.header("💿 Bulk Album Editor")
-bulk_album = st.text_input("Album name (applied to all):", value="")
+bulk_album = st.text_input("Album name (applied to all tracks):", value="")
 
 # ---------------------------------------
 # Step 4: Edit
@@ -118,9 +120,13 @@ for i, mp3_file in enumerate(uploaded_mp3s[:50]):
     artist_val = audiofile.tag.artist or artist_guess
     album_val = bulk_album or (audiofile.tag.album or "")
 
-    title = st.text_input(f"Title ({mp3_file.name})", value=title_val or "", key=f"title_{i}")
-    artist = st.text_input(f"Artist ({mp3_file.name})", value=artist_val or "", key=f"artist_{i}")
-    album = st.text_input(f"Album ({mp3_file.name})", value=album_val or "", key=f"album_{i}")
+    cols = st.columns(3)
+    with cols[0]:
+        title = st.text_input(f"Title", value=title_val or "", key=f"title_{i}")
+    with cols[1]:
+        artist = st.text_input(f"Artist", value=artist_val or "", key=f"artist_{i}")
+    with cols[2]:
+        album = st.text_input(f"Album", value=album_val or "", key=f"album_{i}")
 
     img_upload = st.file_uploader(
         f"Thumbnail ({mp3_file.name})", type=["jpg", "jpeg", "png"], key=f"img_{i}"
@@ -145,8 +151,10 @@ if st.button("💾 Save All and Download ZIP"):
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     zip_filename = f"edited_mp3s_{now}.zip"
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    temp_dir = tempfile.mkdtemp()
+    zip_path = os.path.join(temp_dir, zip_filename)
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         progress = st.progress(0)
         for idx, track in enumerate(edited_tracks):
             audiofile = eyed3.load(track["tmp_path"])
@@ -157,7 +165,9 @@ if st.button("💾 Save All and Download ZIP"):
 
             audiofile.tag.title = normalize_text(track["title"])
             audiofile.tag.artist = normalize_text(track["artist"])
-            audiofile.tag.album = normalize_text(track["album"])
+            # Apply bulk album if set
+            album_name = normalize_text(bulk_album if bulk_album else track["album"])
+            audiofile.tag.album = album_name
             audiofile.tag.genre = None  # skip genre
             audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
 
@@ -169,17 +179,29 @@ if st.button("💾 Save All and Download ZIP"):
             zf.write(track["tmp_path"], arcname=track["file"].name)
             progress.progress((idx + 1) / len(edited_tracks))
 
-    progress.empty()
+    # Read and cleanup
+    with open(zip_path, "rb") as f:
+        zip_bytes = f.read()
+
+    # Clean temp files & dirs
+    for track in edited_tracks:
+        try:
+            os.remove(track["tmp_path"])
+        except Exception:
+            pass
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
     st.success("✅ All MP3s processed successfully!")
 
     st.download_button(
         label="⬇️ Download Edited MP3s as ZIP",
-        data=buffer.getvalue(),
+        data=zip_bytes,
         file_name=zip_filename,
         mime="application/zip",
     )
 
 st.write("by Micio 🎵")
+
 
 
 
