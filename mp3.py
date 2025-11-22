@@ -1,9 +1,9 @@
- # streamlit_app.py
+# streamlit_app.py
 
 import streamlit as st
 import os
 import subprocess
-import hashlib
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import zipfile
@@ -22,8 +22,16 @@ st.markdown(
 uploaded_file = st.file_uploader("Upload a .txt file", type="txt")
 
 if uploaded_file is not None:
-    search_terms = [line.strip() for line in uploaded_file.getvalue().decode("utf-8").splitlines() if line.strip()]
-    st.success(f"🎶 Found {len(search_terms)} songs!")
+    raw_terms = [line.strip() for line in uploaded_file.getvalue().decode("utf-8").splitlines() if line.strip()]
+
+    # --- Clean search terms ---
+    def clean_term(term):
+        term = re.sub(r'\(.*?\)', '', term)
+        term = re.sub(r'\[.*?\]', '', term)
+        return term.strip()
+
+    search_terms = [clean_term(t) for t in raw_terms]
+    st.success(f"🎶 Found {len(search_terms)} songs! Cleaned terms for better success rate.")
 
     # --- Prepare output folder ---
     output_dir = "mp3_downloads"
@@ -31,28 +39,22 @@ if uploaded_file is not None:
 
     # --- Define download function ---
     def download_song(term, max_retries=2):
-        # Use a hash for unique filenames
-        safe_name = hashlib.md5(term.encode()).hexdigest()
-        existing_files = [f for f in os.listdir(output_dir) if safe_name in f]
-        if existing_files:
-            return (term, "skipped")
-
-        cmd = [
-            "yt-dlp",
-            f"ytsearch1:{term}",
-            "-x",
-            "--audio-format", "mp3",
-            "--audio-quality", "0",
-            "-o", f"{output_dir}/{safe_name}.%(ext)s",
-            "--restrict-filenames",
-            "--geo-bypass",      # bypass geographic restrictions
-            "--cookies", "",     # avoid cookie prompts
-            "--no-warnings",     # suppress warnings
-            "--quiet"            # fully silent
-        ]
-
+        # Attempt to download and use the YouTube title as filename
         attempt = 0
         while attempt <= max_retries:
+            cmd = [
+                "yt-dlp",
+                f"ytsearch1:{term}",
+                "-x",
+                "--audio-format", "mp3",
+                "--audio-quality", "0",
+                "-o", f"{output_dir}/%(title)s.%(ext)s",
+                "--restrict-filenames",
+                "--geo-bypass",
+                "--cookies", "",
+                "--no-warnings",
+                "--quiet"
+            ]
             try:
                 subprocess.run(cmd, check=True)
                 return (term, "success")
@@ -106,6 +108,7 @@ if uploaded_file is not None:
             file_name="mp3_downloads.zip",
             mime="application/zip"
         )
+
 
 
 
