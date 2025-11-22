@@ -2,14 +2,15 @@
 
 import streamlit as st
 import os
-import subprocess
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
+from pytube import YouTube, Search
+from pydub import AudioSegment
 import zipfile
+import time
 
 # --- App title ---
-st.title("🎵 YouTube MP3 Downloader")
+st.title("🎵 YouTube MP3 Downloader (pytube + retry)")
 st.write("Upload a text file with one song title per line. The app will download MP3s from YouTube automatically.")
 
 # Optional clickable link
@@ -28,6 +29,7 @@ if uploaded_file is not None:
     def clean_term(term):
         term = re.sub(r'\(.*?\)', '', term)
         term = re.sub(r'\[.*?\]', '', term)
+        term = re.sub(r'[^\x20-\x7E]+', '', term)  # remove invisible chars
         return term.strip()
 
     search_terms = [clean_term(t) for t in raw_terms]
@@ -37,30 +39,33 @@ if uploaded_file is not None:
     output_dir = "mp3_downloads"
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- Define download function ---
+    # --- Define download function with retries ---
     def download_song(term, max_retries=2):
-        # Attempt to download and use the YouTube title as filename
-        attempt = 0
-        while attempt <= max_retries:
-            cmd = [
-                "yt-dlp",
-                f"ytsearch1:{term}",
-                "-x",
-                "--audio-format", "mp3",
-                "--audio-quality", "0",
-                "-o", f"{output_dir}/%(title)s.%(ext)s",
-                "--restrict-filenames",
-                "--geo-bypass",
-                "--cookies", "",
-                "--no-warnings",
-                "--quiet"
-            ]
+        for attempt in range(max_retries + 1):
             try:
-                subprocess.run(cmd, check=True)
+                # Search YouTube and get the first video
+                results = Search(term).results
+                if not results:
+                    continue
+                yt = results[0]
+
+                # Use video title for filename
+                title_safe = re.sub(r'[\\/*?:"<>|]', "", yt.title)
+                mp3_path = os.path.join(output_dir, f"{title_safe}.mp3")
+
+                if os.path.exists(mp3_path):
+                    return (term, "skipped")
+
+                # Download audio stream
+                audio_stream = yt.streams.filter(only_audio=True).first()
+                temp_file = audio_stream.download(output_path=output_dir, filename="temp_audio")
+
+                # Convert to MP3 using pydub
+                AudioSegment.from_file(temp_file).export(mp3_path, format="mp3")
+                os.remove(temp_file)
                 return (term, "success")
-            except subprocess.CalledProcessError:
-                attempt += 1
-                time.sleep(1)
+            except Exception:
+                time.sleep(1)  # wait 1 second before retry
         return (term, "failed")
 
     # --- Run downloads in parallel ---
@@ -108,8 +113,6 @@ if uploaded_file is not None:
             file_name="mp3_downloads.zip",
             mime="application/zip"
         )
-
-
 
 
 
