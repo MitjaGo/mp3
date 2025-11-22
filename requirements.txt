@@ -12,3 +12,4 @@ concurrent-log-handler
 ffmpeg
 yt-dlp[async]
 aiofiles
+pytub
