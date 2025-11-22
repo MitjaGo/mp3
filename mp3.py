@@ -1,4 +1,4 @@
-# streamlit_app.py
+ # streamlit_app.py
 
 import streamlit as st
 import os
@@ -10,9 +10,9 @@ import zipfile
 
 # --- App title ---
 st.title("🎵 YouTube MP3 Downloader")
-st.write("Upload a text file with one song title per line. The app will download MP3s from YouTube.")
+st.write("Upload a text file with one song title per line. The app will download MP3s from YouTube automatically.")
 
-# Clickable link that opens in a new tab
+# Optional clickable link
 st.markdown(
     '<a href="https://www.tunemymusic.com/transfer" target="_blank">🎵 Transfer your playlist with TuneMyMusic</a>',
     unsafe_allow_html=True
@@ -31,6 +31,7 @@ if uploaded_file is not None:
 
     # --- Define download function ---
     def download_song(term, max_retries=2):
+        # Use a hash for unique filenames
         safe_name = hashlib.md5(term.encode()).hexdigest()
         existing_files = [f for f in os.listdir(output_dir) if safe_name in f]
         if existing_files:
@@ -43,15 +44,17 @@ if uploaded_file is not None:
             "--audio-format", "mp3",
             "--audio-quality", "0",
             "-o", f"{output_dir}/{safe_name}.%(ext)s",
-            "--restrict-filenames"
+            "--restrict-filenames",
+            "--geo-bypass",      # bypass geographic restrictions
+            "--cookies", "",     # avoid cookie prompts
+            "--no-warnings",     # suppress warnings
+            "--quiet"            # fully silent
         ]
 
         attempt = 0
         while attempt <= max_retries:
             try:
-                subprocess.run(cmd, check=True,
-                               stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL)
+                subprocess.run(cmd, check=True)
                 return (term, "success")
             except subprocess.CalledProcessError:
                 attempt += 1
