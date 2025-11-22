@@ -12,8 +12,6 @@ import zipfile
 st.title("🎵 YouTube MP3 Downloader")
 st.write("Upload a text file with one song title per line. The app will download MP3s from YouTube.")
 
-st.title("🎵 YouTube MP3 Downloader")
-
 # Clickable link that opens in a new tab
 st.markdown(
     '<a href="https://www.tunemymusic.com/transfer" target="_blank">🎵 Transfer your playlist with TuneMyMusic</a>',
