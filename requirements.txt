@@ -13,3 +13,4 @@ ffmpeg
 yt-dlp[async]
 aiofiles
 pytub
+pytube
