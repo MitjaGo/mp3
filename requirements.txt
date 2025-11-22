@@ -12,5 +12,5 @@ concurrent-log-handler
 ffmpeg
 yt-dlp[async]
 aiofiles
-pytub
-pytube
+pytube==15.0.0
+pydub==0.25.1
