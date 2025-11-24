@@ -1,4 +1,4 @@
-# 🎧 Streamlit MP3 Tag Editor (Robust Thumbnail Override)
+# 🎧 Streamlit MP3 Tag Editor (Guaranteed Thumbnail Replacement)
 # =========================================================
 import streamlit as st
 import eyed3
@@ -57,12 +57,6 @@ def safe_load_audio(file_bytes: bytes):
         audiofile = eyed3.load(tmp_path)
     except Exception:
         audiofile = None
-    if audiofile and audiofile.tag and getattr(audiofile.tag, "genre", None):
-        try:
-            if audiofile.tag.genre and audiofile.tag.genre.id >= 250:
-                audiofile.tag.genre = None
-        except Exception:
-            audiofile.tag.genre = None
     return audiofile, tmp_path
 
 # ---------------------------------------
@@ -115,12 +109,10 @@ for i, mp3_file in enumerate(uploaded_mp3s[:50]):
     if not audiofile:
         st.error(f"⚠️ Could not read {mp3_file.name}")
         continue
-    if not audiofile.tag:
-        audiofile.initTag()
 
-    title_val = audiofile.tag.title or title_guess
-    artist_val = audiofile.tag.artist or artist_guess
-    album_val = bulk_album or (audiofile.tag.album or "")
+    title_val = audiofile.tag.title if audiofile.tag else title_guess
+    artist_val = audiofile.tag.artist if audiofile.tag else artist_guess
+    album_val = bulk_album or (audiofile.tag.album if audiofile.tag else "")
 
     cols = st.columns(3)
     with cols[0]:
@@ -142,8 +134,7 @@ for i, mp3_file in enumerate(uploaded_mp3s[:50]):
         "artist": artist.strip(),
         "album": album.strip(),
         "image": img_data,
-        "tmp_path": tmp_path,
-        "audiofile": audiofile
+        "tmp_path": tmp_path
     })
 
 # ---------------------------------------
@@ -160,9 +151,17 @@ if st.button("💾 Save All and Download ZIP"):
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         progress = st.progress(0)
         for idx, track in enumerate(edited_tracks):
-            audiofile = track["audiofile"]
-            if not audiofile.tag:
-                audiofile.initTag()
+            audiofile, _ = safe_load_audio(track["file"].getvalue())
+            if not audiofile:
+                continue
+
+            # ✅ Delete old tags and initialize new ID3v2.3
+            try:
+                if audiofile.tag:
+                    audiofile.tag.delete()
+                audiofile.initTag(version=eyed3.id3.ID3_V2_3)
+            except Exception:
+                audiofile.initTag(version=eyed3.id3.ID3_V2_3)
 
             # Update tags
             audiofile.tag.title = normalize_text(track["title"])
@@ -173,16 +172,7 @@ if st.button("💾 Save All and Download ZIP"):
             audiofile.tag.track_num = (idx + 1, len(edited_tracks))
             audiofile.tag.genre = None
 
-            # Robust thumbnail override
-            if force_override:
-                try:
-                    if hasattr(audiofile.tag, "images") and audiofile.tag.images:
-                        for img in list(audiofile.tag.images):
-                            audiofile.tag.images.remove(img)
-                except Exception:
-                    pass
-
-            # Always add new front cover
+            # Attach new front cover
             try:
                 audiofile.tag.images.set(
                     ImageFrame.FRONT_COVER,
@@ -199,6 +189,7 @@ if st.button("💾 Save All and Download ZIP"):
             except Exception:
                 audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding="utf-16")
 
+            # Write MP3 to ZIP
             zf.write(track["tmp_path"], arcname=track["file"].name)
             progress.progress((idx + 1) / len(edited_tracks))
 
