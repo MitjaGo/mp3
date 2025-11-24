@@ -1,7 +1,8 @@
-# 🎧 Streamlit MP3 Tag Editor (Stable Fixed Version - Safe Thumbnail)
+# 🎧 Streamlit MP3 Tag Editor (Robust Thumbnail Override)
 # =========================================================
 import streamlit as st
 import eyed3
+from eyed3.id3.frames import ImageFrame
 from PIL import Image as PILImage
 import io
 import tempfile
@@ -172,17 +173,23 @@ if st.button("💾 Save All and Download ZIP"):
             audiofile.tag.track_num = (idx + 1, len(edited_tracks))
             audiofile.tag.genre = None
 
-            # Safe thumbnail override
-            try:
-                if force_override:
+            # Robust thumbnail override
+            if force_override:
+                try:
                     if hasattr(audiofile.tag, "images") and audiofile.tag.images:
-                        audiofile.tag.images.remove_all()
-            except Exception:
-                pass
+                        for img in list(audiofile.tag.images):
+                            audiofile.tag.images.remove(img)
+                except Exception:
+                    pass
 
-            # Always set new cover
+            # Always add new front cover
             try:
-                audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
+                audiofile.tag.images.set(
+                    ImageFrame.FRONT_COVER,
+                    track["image"],
+                    "image/jpeg",
+                    u"Cover"
+                )
             except Exception:
                 pass
 
@@ -214,6 +221,7 @@ if st.button("💾 Save All and Download ZIP"):
     )
 
 st.write("by Micio 🎵")
+
 
 
 
