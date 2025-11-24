@@ -1,287 +1,211 @@
-# id3-beta.py
-# Streamlit MP3 Bulk Tag + Thumbnail Editor
-# Run: streamlit run id3-beta.py
-
+# 🎧 Streamlit MP3 Tag Editor (Final Stable Version)
+# ===========================================
 import streamlit as st
 import eyed3
-from PIL import Image, UnidentifiedImageError
+from PIL import Image as PILImage
 import io
-import re
+import tempfile
 import zipfile
-import os
+import re
 from datetime import datetime
-from pathlib import Path
+import unicodedata
+import os
+import shutil
 
-st.set_page_config(page_title="MP3 Bulk Tag Editor", layout="wide")
-st.title("🎵 MP3 Bulk Tag + Thumbnail Editor")
+# ---------------------------------------
+# Streamlit setup
+# ---------------------------------------
+st.set_page_config(page_title="MP3 Tag Editor", page_icon="🎵", layout="centered")
+st.title("🎧 MP3 Metadata & Thumbnail Editor")
 
-WORKDIR = Path("uploaded_mp3s")
-WORKDIR.mkdir(exist_ok=True)
+# ---------------------------------------
+# Helpers
+# ---------------------------------------
+def resize_jpeg(img_data: bytes, max_size: int = 500) -> bytes:
+    """Resize and convert any image to JPEG bytes."""
+    img = PILImage.open(io.BytesIO(img_data))
+    img.thumbnail((max_size, max_size))
+    out = io.BytesIO()
+    img.convert("RGB").save(out, format="JPEG", quality=85)
+    return out.getvalue()
 
-
-# ---------------------------- HELPERS ---------------------------------
-
-def resize_and_validate(img_bytes, max_size=800):
-    try:
-        img = Image.open(io.BytesIO(img_bytes))
-        img = img.convert("RGB")
-        img.thumbnail((max_size, max_size))
-        out = io.BytesIO()
-        img.save(out, format="JPEG", quality=90)
-        return out.getvalue()
-    except UnidentifiedImageError:
-        return None
-    except:
-        return None
-
-
-def parse_filename(fname):
-    name = re.sub(r'\.mp3$', '', fname, flags=re.I)
-    parts = re.split(r'\s*-\s*', name)
+def parse_filename(filename: str):
+    """Guess artist/title from filename."""
+    name = re.sub(r"\.\w+$", "", filename)
+    parts = re.split(r"\s*-\s*", name)
     parts = [p.strip() for p in parts if p.strip()]
+    if parts and re.match(r"^\d+$", parts[0]):
+        parts = parts[1:]
+    artist, title = "", ""
+    if len(parts) >= 2:
+        artist, title = parts[0], " - ".join(parts[1:])
+    elif len(parts) == 1:
+        title = parts[0]
+    return artist.strip(), title.strip()
 
-    if len(parts) >= 3:
-        return parts[1], " - ".join(parts[2:])
-    elif len(parts) == 2:
-        return parts[0], parts[1]
-    else:
-        return "", parts[0] if parts else fname
+def normalize_text(s: str) -> str:
+    """Clean up text for ID3 tags."""
+    if not s:
+        return ""
+    return unicodedata.normalize("NFC", s).replace("\x00", "")
 
-
-def safe_clear_images(audio):
-    if audio is None or audio.tag is None:
-        return
-
-    # Method 1
+def safe_load_audio(file_bytes: bytes):
+    """Load MP3 safely from bytes buffer (no temp file errors)."""
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tmp.write(file_bytes)
+    tmp_path = tmp.name
+    tmp.close()
+    eyed3.log.setLevel("ERROR")
     try:
-        if hasattr(audio.tag.images, "remove_all"):
-            audio.tag.images.remove_all()
-            return
-    except:
-        pass
+        audiofile = eyed3.load(tmp_path)
+    except Exception:
+        audiofile = None
+    if audiofile and audiofile.tag and getattr(audiofile.tag, "genre", None):
+        try:
+            if audiofile.tag.genre and audiofile.tag.genre.id >= 250:
+                audiofile.tag.genre = None
+        except Exception:
+            audiofile.tag.genre = None
+    return audiofile, tmp_path
 
-    # Method 2
-    try:
-        if hasattr(audio.tag.images, "_images"):
-            audio.tag.images._images.clear()
-            return
-    except:
-        pass
-
-    # Method 3
-    try:
-        for img in list(audio.tag.images):
-            try:
-                ptype = getattr(img, "picture_type", None)
-                if ptype is not None:
-                    audio.tag.images.remove(ptype)
-            except:
-                pass
-    except:
-        pass
-
-
-def embed_cover(audio, cover_bytes):
-    if audio.tag is None:
-        audio.initTag()
-
-    safe_clear_images(audio)
-
-    audio.tag.images.set(3, cover_bytes, "image/jpeg", u"Cover")
-
-
-def set_tags(filepath, title, artist, album, cover, track=None):
-    audio = eyed3.load(filepath)
-
-    if audio is None:
-        return
-
-    if audio.tag is None:
-        audio.initTag()
-
-    audio.tag.title = title or None
-    audio.tag.artist = artist or None
-    audio.tag.album = album or None
-
-    if track:
-        audio.tag.track_num = (track, None)
-
-    if cover:
-        embed_cover(audio, cover)
-
-    audio.tag.save(version=eyed3.id3.ID3_V2_3)
-
-
-def save_files(uploaded):
-    paths = []
-    for f in uploaded:
-        target = WORKDIR / f.name
-        with open(target, "wb") as out:
-            out.write(f.getvalue())
-        paths.append(str(target))
-    return paths
-
-
-def clean_name(name):
-    return re.sub(r"\s*\(\d+\)(?=\.\w+$)", "", name)
-
-
-# ---------------------------- SIDEBAR ---------------------------------
-
-st.sidebar.title("Upload")
-
-mp3_upload = st.sidebar.file_uploader("Upload MP3(s)", type=["mp3"], accept_multiple_files=True)
-zip_upload = st.sidebar.file_uploader("Upload ZIP", type=["zip"])
-bulk_image = st.sidebar.file_uploader("Bulk Thumbnail", type=["jpg","jpeg","png","webp"])
-
-auto_track = st.sidebar.checkbox("Auto track numbers")
-apply_album_all = st.sidebar.text_input("Album for all")
-apply_album_btn = st.sidebar.button("Apply Album To All")
-apply_cover_btn = st.sidebar.button("Apply BULK COVER (REPLACE ALL)")
-
-
-# unzip if zip uploaded
-if zip_upload:
-    zip_path = WORKDIR / zip_upload.name
-    with open(zip_path, "wb") as f:
-        f.write(zip_upload.getvalue())
-
-    with zipfile.ZipFile(zip_path) as z:
-        z.extractall(WORKDIR)
-
-    zip_path.unlink()
-    st.sidebar.success("ZIP extracted")
-
-
-# save mp3 uploads
-if mp3_upload:
-    save_files(mp3_upload)
-
-
-# get all mp3s in folder
-mp3_files = sorted([str(p) for p in WORKDIR.glob("*.mp3")])
-
-if not mp3_files:
-    st.warning("Upload MP3 or ZIP to begin")
+# ---------------------------------------
+# Step 1: Default Thumbnail
+# ---------------------------------------
+st.header("📸 Upload Default Thumbnail")
+default_img_file = st.file_uploader(
+    "Upload a default JPG/PNG image", type=["jpg", "jpeg", "png"]
+)
+if not default_img_file:
+    st.warning("Please upload a default thumbnail to continue.")
     st.stop()
 
+default_img_data = resize_jpeg(default_img_file.getvalue())
+st.image(default_img_data, caption="Default Thumbnail", width=150)
 
-# process bulk image
-bulk_img_data = None
-if bulk_image:
-    bulk_img_data = resize_and_validate(bulk_image.getvalue())
-    if bulk_img_data is None:
-        st.sidebar.error("Invalid image file")
+# ---------------------------------------
+# Step 2: MP3 Upload
+# ---------------------------------------
+st.header("🎵 Upload MP3 Files")
+uploaded_mp3s = st.file_uploader(
+    "Upload up to 50 MP3s", type=["mp3"], accept_multiple_files=True
+)
+if not uploaded_mp3s:
+    st.info("Please upload MP3 files to begin editing.")
+    st.stop()
 
+# ---------------------------------------
+# Step 3: Bulk Album Editor
+# ---------------------------------------
+st.header("💿 Bulk Album Editor")
+bulk_album = st.text_input("Album name (applied to all tracks):", value="")
 
-# Apply bulk cover immediately
-if apply_cover_btn and bulk_img_data:
-    for m in mp3_files:
-        audio = eyed3.load(m)
-        if audio:
-            embed_cover(audio, bulk_img_data)
-            audio.tag.save(version=eyed3.id3.ID3_V2_3)
+# ---------------------------------------
+# Step 4: Edit
+# ---------------------------------------
+st.header("📝 Edit Tags")
+edited_tracks = []
 
-    st.sidebar.success("Bulk cover applied to all files")
+for i, mp3_file in enumerate(uploaded_mp3s[:50]):
+    st.subheader(f"🎵 {mp3_file.name}")
+    artist_guess, title_guess = parse_filename(mp3_file.name)
 
+    audiofile, tmp_path = safe_load_audio(mp3_file.getvalue())
+    if not audiofile:
+        st.error(f"⚠️ Could not read {mp3_file.name}")
+        continue
+    if not audiofile.tag:
+        audiofile.initTag()
 
-# ---------------------------- MAIN ---------------------------------
+    title_val = audiofile.tag.title or title_guess
+    artist_val = audiofile.tag.artist or artist_guess
+    album_val = bulk_album or (audiofile.tag.album or "")
 
-st.header("Edit MP3 Tags")
+    cols = st.columns(3)
+    with cols[0]:
+        title = st.text_input(f"Title", value=title_val or "", key=f"title_{i}")
+    with cols[1]:
+        artist = st.text_input(f"Artist", value=artist_val or "", key=f"artist_{i}")
+    with cols[2]:
+        album = st.text_input(f"Album", value=album_val or "", key=f"album_{i}")
 
-songs = []
+    img_upload = st.file_uploader(
+        f"Thumbnail ({mp3_file.name})", type=["jpg", "jpeg", "png"], key=f"img_{i}"
+    )
+    img_data = resize_jpeg(img_upload.getvalue()) if img_upload else default_img_data
 
-for i, path in enumerate(mp3_files):
-    filename = os.path.basename(path)
-    default_artist, default_title = parse_filename(filename)
-
-    audio = eyed3.load(path)
-
-    if audio and audio.tag:
-        title = audio.tag.title or default_title
-        artist = audio.tag.artist or default_artist
-        album = audio.tag.album or ""
-    else:
-        title = default_title
-        artist = default_artist
-        album = ""
-
-    songs.append({
-        "path": path,
-        "filename": filename,
-        "title": title,
-        "artist": artist,
-        "album": album
+    edited_tracks.append({
+        "file": mp3_file,
+        "title": title.strip(),
+        "artist": artist.strip(),
+        "album": album.strip(),
+        "image": img_data,
+        "tmp_path": tmp_path
     })
 
+# ---------------------------------------
+# Step 5: Save & Download
+# ---------------------------------------
+st.header("💾 Save & Download")
 
-for i, song in enumerate(songs):
+if st.button("💾 Save All and Download ZIP"):
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    zip_filename = f"edited_mp3s_{now}.zip"
 
-    st.subheader(f"{i+1}. {song['filename']}")
+    temp_dir = tempfile.mkdtemp()
+    zip_path = os.path.join(temp_dir, zip_filename)
 
-    c1, c2, c3, c4, c5 = st.columns([3,3,3,2,2])
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        progress = st.progress(0)
+        for idx, track in enumerate(edited_tracks):
+            audiofile = eyed3.load(track["tmp_path"])
+            if not audiofile:
+                continue
+            if not audiofile.tag:
+                audiofile.initTag()
 
-    with c1:
-        song["title"] = st.text_input("Title", song["title"], key=f"t{i}")
+            audiofile.tag.title = normalize_text(track["title"])
+            audiofile.tag.artist = normalize_text(track["artist"])
+            # Apply bulk album if set
+            album_name = normalize_text(bulk_album if bulk_album else track["album"])
+            audiofile.tag.album = album_name
+            audiofile.tag.genre = None  # skip genre
+            audiofile.tag.images.set(3, track["image"], "image/jpeg", u"Cover")
 
-    with c2:
-        song["artist"] = st.text_input("Artist", song["artist"], key=f"a{i}")
+            try:
+                audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding="latin1")
+            except UnicodeEncodeError:
+                audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding="utf-16")
 
-    with c3:
-        album_val = apply_album_all if apply_album_btn and apply_album_all else song["album"]
-        song["album"] = st.text_input("Album", album_val, key=f"al{i}")
+            zf.write(track["tmp_path"], arcname=track["file"].name)
+            progress.progress((idx + 1) / len(edited_tracks))
 
-    with c4:
-        track_val = i+1 if auto_track else ""
-        song["track"] = st.text_input("Track #", track_val, key=f"tr{i}")
+    # Read and cleanup
+    with open(zip_path, "rb") as f:
+        zip_bytes = f.read()
 
-    with c5:
-        custom = st.file_uploader("Cover", type=["jpg","png","jpeg","webp"], key=f"c{i}")
-        song["custom_cover"] = None
-
-        if custom:
-            img = resize_and_validate(custom.getvalue())
-            if img:
-                song["custom_cover"] = img
-                st.image(img, width=80)
-
-
-# ---------------------------- ACTIONS ---------------------------------
-
-if st.button("💾 SAVE ALL TAGS"):
-
-    for i, song in enumerate(songs):
-        cover = song["custom_cover"] or bulk_img_data
-
+    # Clean temp files & dirs
+    for track in edited_tracks:
         try:
-            track = int(song["track"]) if song["track"] else None
-        except:
-            track = None
+            os.remove(track["tmp_path"])
+        except Exception:
+            pass
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
-        set_tags(
-            song["path"],
-            song["title"],
-            song["artist"],
-            song["album"],
-            cover,
-            track
-        )
+    st.success("✅ All MP3s processed successfully!")
 
-    st.success("All tags saved successfully ✅")
+    st.download_button(
+        label="⬇️ Download Edited MP3s as ZIP",
+        data=zip_bytes,
+        file_name=zip_filename,
+        mime="application/zip",
+    )
+
+st.write("by Micio 🎵")
 
 
-if st.button("📦 DOWNLOAD ZIP"):
-    zip_name = f"edited_mp3s_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
 
-    with zipfile.ZipFile(zip_name, "w") as z:
-        for song in songs:
-            arc = clean_name(song["filename"])
-            z.write(song["path"], arc)
 
-    with open(zip_name, "rb") as f:
-        st.download_button("Download", f, file_name=zip_name)
 
-    os.remove(zip_name)
 
 
 
