@@ -1,5 +1,5 @@
-# 🎧 Streamlit MP3 Tag Editor (Mutagen, Cover-First, Individual Album)
-# ====================================================================
+# 🎧 Streamlit MP3 Tag Editor (Mutagen, Cover-First, Bulk + Individual Album)
+# =========================================================================
 import streamlit as st
 from PIL import Image as PILImage
 import io
@@ -11,13 +11,13 @@ import unicodedata
 import os
 import shutil
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TRCK, TDRC
+from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TRCK, TDRC, ID3NoHeaderError
 
 # ---------------------------------------
 # Streamlit setup
 # ---------------------------------------
 st.set_page_config(page_title="MP3 Tag Editor", page_icon="🎵", layout="centered")
-st.title("🎧 MP3 Metadata & Thumbnail Editor (Cover-First, Individual Album)")
+st.title("🎧 MP3 Metadata & Thumbnail Editor (Cover-First, Bulk + Individual Album)")
 
 # ---------------------------------------
 # Helpers
@@ -51,7 +51,7 @@ def normalize_text(s: str) -> str:
 # Step 1: Default Thumbnail
 # ---------------------------------------
 st.header("📸 Upload Default Thumbnail")
-default_img_file = st.file_uploader("Upload a default JPG/PNG image", type=["jpg", "jpeg", "png"])
+default_img_file = st.file_uploader("Upload a default JPG/PNG image", type=["jpg","jpeg","png"])
 if not default_img_file:
     st.warning("Please upload a default thumbnail to continue.")
     st.stop()
@@ -69,9 +69,10 @@ if not uploaded_mp3s:
     st.stop()
 
 # ---------------------------------------
-# Step 3: Year Editor
+# Step 3: Bulk Album / Year Editor
 # ---------------------------------------
-st.header("🗓 Year Editor (applied to all tracks)")
+st.header("💿 Bulk Album & Year Editor")
+bulk_album = st.text_input("Bulk Album (applied to all tracks if filled)", value="")
 bulk_year = st.number_input("Year", min_value=1900, max_value=2100, value=datetime.now().year)
 
 # ---------------------------------------
@@ -90,11 +91,10 @@ for i, mp3_file in enumerate(uploaded_mp3s[:50]):
     tmp_path = tmp.name
     tmp.close()
 
-    # Load MP3 and existing ID3 tags safely
-    audio = MP3(tmp_path)
+    # Load existing ID3 tags
     try:
         audio_tags = ID3(tmp_path)
-    except:
+    except ID3NoHeaderError:
         audio_tags = ID3()
 
     title_val = audio_tags.get('TIT2').text[0] if 'TIT2' in audio_tags else title_guess
@@ -108,18 +108,21 @@ for i, mp3_file in enumerate(uploaded_mp3s[:50]):
     with cols[1]:
         artist = st.text_input("Artist", value=artist_val or "", key=f"artist_{i}")
     with cols[2]:
-        album = st.text_input("Album", value=album_val or "", key=f"album_{i}")
+        album = st.text_input("Album (Individual)", value=album_val or "", key=f"album_{i}")
     with cols[3]:
         img_upload = st.file_uploader(f"Thumbnail ({mp3_file.name})", type=["jpg","jpeg","png"], key=f"img_{i}")
 
     img_data = resize_jpeg(img_upload.getvalue()) if img_upload else default_img_data
     st.image(img_data, width=100, caption="Cover Preview")
 
+    # Decide final album: bulk_album overrides individual if filled
+    final_album = bulk_album.strip() if bulk_album.strip() else album.strip()
+
     edited_tracks.append({
         "file": mp3_file,
         "title": title.strip(),
         "artist": artist.strip(),
-        "album": album.strip(),
+        "album": final_album,
         "image": img_data,
         "tmp_path": tmp_path
     })
@@ -131,7 +134,6 @@ st.header("💾 Save & Download")
 if st.button("💾 Save All and Download ZIP"):
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     zip_filename = f"edited_mp3s_{now}.zip"
-
     temp_dir = tempfile.mkdtemp()
     zip_path = os.path.join(temp_dir, zip_filename)
 
@@ -140,14 +142,14 @@ if st.button("💾 Save All and Download ZIP"):
         for idx, track in enumerate(edited_tracks):
             tmp_path = track["tmp_path"]
 
-            # Delete old tags
+            # Load or create ID3 tag
             try:
-                MP3(tmp_path).delete()
-            except:
-                pass
+                audio_tags = ID3(tmp_path)
+            except ID3NoHeaderError:
+                audio_tags = ID3()
 
-            # Create new ID3 tag
-            audio_tags = ID3()
+            # Remove all existing cover images
+            audio_tags.delall('APIC')
 
             # --- COVER FIRST ---
             audio_tags.add(
@@ -160,9 +162,8 @@ if st.button("💾 Save All and Download ZIP"):
                 )
             )
 
-            # Then add all text fields including individual album
-            album_name = normalize_text(track["album"]) if track["album"] else ""
-            audio_tags.add(TALB(encoding=3, text=album_name))
+            # Then add all text fields including album
+            audio_tags.add(TALB(encoding=3, text=normalize_text(track["album"])))
             audio_tags.add(TIT2(encoding=3, text=normalize_text(track["title"])))
             audio_tags.add(TPE1(encoding=3, text=normalize_text(track["artist"])))
             audio_tags.add(TRCK(encoding=3, text=f"{idx+1}/{len(edited_tracks)}"))
