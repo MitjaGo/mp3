@@ -1,5 +1,5 @@
-# 🎧 Streamlit MP3 Tag Editor (Mutagen Version - Guaranteed Cover Replacement)
-# ============================================================================
+# 🎧 Streamlit MP3 Tag Editor (Mutagen, Safe ID3 Handling)
+# =======================================================
 import streamlit as st
 from PIL import Image as PILImage
 import io
@@ -17,7 +17,7 @@ from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TRCK, TDRC, ID3NoHeaderErro
 # Streamlit setup
 # ---------------------------------------
 st.set_page_config(page_title="MP3 Tag Editor", page_icon="🎵", layout="centered")
-st.title("🎧 MP3 Metadata & Thumbnail Editor (Mutagen)")
+st.title("🎧 MP3 Metadata & Thumbnail Editor (Mutagen Safe)")
 
 # ---------------------------------------
 # Helpers
@@ -98,16 +98,18 @@ for i, mp3_file in enumerate(uploaded_mp3s[:50]):
     tmp_path = tmp.name
     tmp.close()
 
-    # Try to read existing tags
+    # Load MP3
+    audio = MP3(tmp_path)
+    # Load or create ID3 tag safely
     try:
-        audio = MP3(tmp_path, ID3=ID3)
+        audio_tags = ID3(tmp_path)
     except ID3NoHeaderError:
-        audio = MP3(tmp_path)
-        audio.add_tags()
+        audio_tags = ID3()
 
-    title_val = audio.tags.get('TIT2').text[0] if 'TIT2' in audio.tags else title_guess
-    artist_val = audio.tags.get('TPE1').text[0] if 'TPE1' in audio.tags else artist_guess
-    album_val = audio.tags.get('TALB').text[0] if 'TALB' in audio.tags else ""
+    # Existing metadata or filename guess
+    title_val = audio_tags.get('TIT2').text[0] if 'TIT2' in audio_tags else title_guess
+    artist_val = audio_tags.get('TPE1').text[0] if 'TPE1' in audio_tags else artist_guess
+    album_val = audio_tags.get('TALB').text[0] if 'TALB' in audio_tags else ""
 
     # Input fields
     cols = st.columns(3)
@@ -148,24 +150,29 @@ if st.button("💾 Save All and Download ZIP"):
         progress = st.progress(0)
         for idx, track in enumerate(edited_tracks):
             tmp_path = track["tmp_path"]
-            audio = MP3(tmp_path, ID3=ID3)
+            audio = MP3(tmp_path)
 
-            # Delete all old tags
+            # Delete old tags safely
             try:
                 audio.delete()
-                audio.add_tags()
-            except Exception:
-                audio.add_tags()
+            except:
+                pass
 
-            # Write new metadata
-            audio.tags.add(TIT2(encoding=3, text=normalize_text(track["title"])))
-            audio.tags.add(TPE1(encoding=3, text=normalize_text(track["artist"])))
-            audio.tags.add(TALB(encoding=3, text=normalize_text(track["album"])))
-            audio.tags.add(TRCK(encoding=3, text=f"{idx+1}/{len(edited_tracks)}"))
-            audio.tags.add(TDRC(encoding=3, text=str(bulk_year)))
+            # Load or create ID3 tag
+            try:
+                audio_tags = ID3(tmp_path)
+            except ID3NoHeaderError:
+                audio_tags = ID3()
+
+            # Add new metadata
+            audio_tags.add(TIT2(encoding=3, text=normalize_text(track["title"])))
+            audio_tags.add(TPE1(encoding=3, text=normalize_text(track["artist"])))
+            audio_tags.add(TALB(encoding=3, text=normalize_text(track["album"])))
+            audio_tags.add(TRCK(encoding=3, text=f"{idx+1}/{len(edited_tracks)}"))
+            audio_tags.add(TDRC(encoding=3, text=str(bulk_year)))
 
             # Add cover art
-            audio.tags.add(
+            audio_tags.add(
                 APIC(
                     encoding=3,
                     mime='image/jpeg',
@@ -175,8 +182,8 @@ if st.button("💾 Save All and Download ZIP"):
                 )
             )
 
-            # Save tags
-            audio.save(v2_version=3)
+            # Save ID3 v2.3
+            audio_tags.save(tmp_path, v2_version=3)
 
             # Add MP3 to ZIP
             zf.write(tmp_path, arcname=track["file"].name)
