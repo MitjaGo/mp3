@@ -1,8 +1,6 @@
-# 🎧 Streamlit MP3 Tag Editor (Guaranteed Thumbnail Replacement)
-# =========================================================
+# 🎧 Streamlit MP3 Tag Editor (Mutagen Version - Guaranteed Cover Replacement)
+# ============================================================================
 import streamlit as st
-import eyed3
-from eyed3.id3.frames import ImageFrame
 from PIL import Image as PILImage
 import io
 import tempfile
@@ -12,12 +10,14 @@ from datetime import datetime
 import unicodedata
 import os
 import shutil
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TRCK, TDRC, ID3NoHeaderError
 
 # ---------------------------------------
 # Streamlit setup
 # ---------------------------------------
 st.set_page_config(page_title="MP3 Tag Editor", page_icon="🎵", layout="centered")
-st.title("🎧 MP3 Metadata & Thumbnail Editor")
+st.title("🎧 MP3 Metadata & Thumbnail Editor (Mutagen)")
 
 # ---------------------------------------
 # Helpers
@@ -46,18 +46,6 @@ def normalize_text(s: str) -> str:
     if not s:
         return ""
     return unicodedata.normalize("NFC", s).replace("\x00", "").strip()
-
-def safe_load_audio(file_bytes: bytes):
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    tmp.write(file_bytes)
-    tmp_path = tmp.name
-    tmp.close()
-    eyed3.log.setLevel("ERROR")
-    try:
-        audiofile = eyed3.load(tmp_path)
-    except Exception:
-        audiofile = None
-    return audiofile, tmp_path
 
 # ---------------------------------------
 # Step 1: Default Thumbnail
@@ -102,25 +90,33 @@ edited_tracks = []
 
 for i, mp3_file in enumerate(uploaded_mp3s[:50]):
     st.subheader(f"🎵 {mp3_file.name}")
-
     artist_guess, title_guess = parse_filename(mp3_file.name)
 
-    audiofile, tmp_path = safe_load_audio(mp3_file.getvalue())
-    if not audiofile:
-        st.error(f"⚠️ Could not read {mp3_file.name}")
-        continue
+    # Save uploaded MP3 to temp
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tmp.write(mp3_file.getvalue())
+    tmp_path = tmp.name
+    tmp.close()
 
-    title_val = audiofile.tag.title if audiofile.tag else title_guess
-    artist_val = audiofile.tag.artist if audiofile.tag else artist_guess
-    album_val = bulk_album or (audiofile.tag.album if audiofile.tag else "")
+    # Try to read existing tags
+    try:
+        audio = MP3(tmp_path, ID3=ID3)
+    except ID3NoHeaderError:
+        audio = MP3(tmp_path)
+        audio.add_tags()
 
+    title_val = audio.tags.get('TIT2').text[0] if 'TIT2' in audio.tags else title_guess
+    artist_val = audio.tags.get('TPE1').text[0] if 'TPE1' in audio.tags else artist_guess
+    album_val = audio.tags.get('TALB').text[0] if 'TALB' in audio.tags else ""
+
+    # Input fields
     cols = st.columns(3)
     with cols[0]:
         title = st.text_input("Title", value=title_val or "", key=f"title_{i}")
     with cols[1]:
         artist = st.text_input("Artist", value=artist_val or "", key=f"artist_{i}")
     with cols[2]:
-        album = st.text_input("Album", value=album_val or "", key=f"album_{i}")
+        album = st.text_input("Album", value=bulk_album or album_val or "", key=f"album_{i}")
 
     img_upload = st.file_uploader(
         f"Thumbnail ({mp3_file.name})", type=["jpg", "jpeg", "png"], key=f"img_{i}"
@@ -151,46 +147,39 @@ if st.button("💾 Save All and Download ZIP"):
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         progress = st.progress(0)
         for idx, track in enumerate(edited_tracks):
-            audiofile, _ = safe_load_audio(track["file"].getvalue())
-            if not audiofile:
-                continue
+            tmp_path = track["tmp_path"]
+            audio = MP3(tmp_path, ID3=ID3)
 
-            # ✅ Delete old tags and initialize new ID3v2.3
+            # Delete all old tags
             try:
-                if audiofile.tag:
-                    audiofile.tag.delete()
-                audiofile.initTag(version=eyed3.id3.ID3_V2_3)
+                audio.delete()
+                audio.add_tags()
             except Exception:
-                audiofile.initTag(version=eyed3.id3.ID3_V2_3)
+                audio.add_tags()
 
-            # Update tags
-            audiofile.tag.title = normalize_text(track["title"])
-            audiofile.tag.artist = normalize_text(track["artist"])
-            album_name = normalize_text(bulk_album if bulk_album else track["album"])
-            audiofile.tag.album = album_name
-            audiofile.tag.recording_date = str(bulk_year)
-            audiofile.tag.track_num = (idx + 1, len(edited_tracks))
-            audiofile.tag.genre = None
+            # Write new metadata
+            audio.tags.add(TIT2(encoding=3, text=normalize_text(track["title"])))
+            audio.tags.add(TPE1(encoding=3, text=normalize_text(track["artist"])))
+            audio.tags.add(TALB(encoding=3, text=normalize_text(track["album"])))
+            audio.tags.add(TRCK(encoding=3, text=f"{idx+1}/{len(edited_tracks)}"))
+            audio.tags.add(TDRC(encoding=3, text=str(bulk_year)))
 
-            # Attach new front cover
-            try:
-                audiofile.tag.images.set(
-                    ImageFrame.FRONT_COVER,
-                    track["image"],
-                    "image/jpeg",
-                    u"Cover"
+            # Add cover art
+            audio.tags.add(
+                APIC(
+                    encoding=3,
+                    mime='image/jpeg',
+                    type=3,
+                    desc='Cover',
+                    data=track["image"]
                 )
-            except Exception:
-                pass
+            )
 
-            # Save tag safely
-            try:
-                audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding="utf-8")
-            except Exception:
-                audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding="utf-16")
+            # Save tags
+            audio.save(v2_version=3)
 
-            # Write MP3 to ZIP
-            zf.write(track["tmp_path"], arcname=track["file"].name)
+            # Add MP3 to ZIP
+            zf.write(tmp_path, arcname=track["file"].name)
             progress.progress((idx + 1) / len(edited_tracks))
 
     # Read ZIP & cleanup
@@ -199,7 +188,7 @@ if st.button("💾 Save All and Download ZIP"):
     for track in edited_tracks:
         try:
             os.remove(track["tmp_path"])
-        except Exception:
+        except:
             pass
     shutil.rmtree(temp_dir, ignore_errors=True)
 
