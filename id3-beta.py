@@ -1,5 +1,5 @@
-# 🎧 Streamlit MP3 Tag Editor (Mutagen, Safe ID3 Handling)
-# =======================================================
+# 🎧 Streamlit MP3 Tag Editor (Mutagen, Album + Thumbnail Fixed)
+# ==============================================================
 import streamlit as st
 from PIL import Image as PILImage
 import io
@@ -17,7 +17,7 @@ from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TRCK, TDRC, ID3NoHeaderErro
 # Streamlit setup
 # ---------------------------------------
 st.set_page_config(page_title="MP3 Tag Editor", page_icon="🎵", layout="centered")
-st.title("🎧 MP3 Metadata & Thumbnail Editor (Mutagen Safe)")
+st.title("🎧 MP3 Metadata & Thumbnail Editor (Fixed Album + Thumbnail)")
 
 # ---------------------------------------
 # Helpers
@@ -100,7 +100,6 @@ for i, mp3_file in enumerate(uploaded_mp3s[:50]):
 
     # Load MP3
     audio = MP3(tmp_path)
-    # Load or create ID3 tag safely
     try:
         audio_tags = ID3(tmp_path)
     except ID3NoHeaderError:
@@ -164,14 +163,15 @@ if st.button("💾 Save All and Download ZIP"):
             except ID3NoHeaderError:
                 audio_tags = ID3()
 
-            # Add new metadata
+            # Always assign album first (bulk or individual)
+            album_name = normalize_text(track["album"]) if track["album"] else ""
+            audio_tags.add(TALB(encoding=3, text=album_name))
             audio_tags.add(TIT2(encoding=3, text=normalize_text(track["title"])))
             audio_tags.add(TPE1(encoding=3, text=normalize_text(track["artist"])))
-            audio_tags.add(TALB(encoding=3, text=normalize_text(track["album"])))
             audio_tags.add(TRCK(encoding=3, text=f"{idx+1}/{len(edited_tracks)}"))
             audio_tags.add(TDRC(encoding=3, text=str(bulk_year)))
 
-            # Add cover art
+            # Add cover art **after all other fields**
             audio_tags.add(
                 APIC(
                     encoding=3,
@@ -208,6 +208,7 @@ if st.button("💾 Save All and Download ZIP"):
     )
 
 st.write("by Micio 🎵")
+
 
 
 
