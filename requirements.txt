@@ -13,4 +13,4 @@ yt-dlp[async]
 aiofiles
 pytube==15.0.0
 pydub==0.25.1
-eyeD3=0.9.7
+eyeD3==0.9.7
